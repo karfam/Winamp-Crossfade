@@ -145,12 +145,11 @@ cmake --build build-win32
 
 ### Making a release
 
-Bump `VERSION` in `CMakeLists.txt`, commit, then tag and push:
+Bump `VERSION` in `CMakeLists.txt` and commit. Then either:
 
-```sh
-git tag v0.3.0
-git push origin v0.3.0
-```
+* on GitHub, go to **Actions → release → Run workflow**, pick the branch and
+  enter the tag (e.g. `v0.3.0`), or
+* push a tag: `git tag v0.3.0 && git push origin v0.3.0`.
 
 The `release` workflow builds and tests the plugin with Visual Studio. It
 then publishes a GitHub Release with `out_crossfade.dll` and a zip (DLL,

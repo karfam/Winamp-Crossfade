@@ -1,11 +1,11 @@
-# Publishes a GitHub Release with the plugin DLL whenever a version tag is
-# pushed:
+# Publishes a GitHub Release with the plugin DLL. Two ways to start it:
 #
-#   git tag v0.2.0 && git push origin v0.2.0
+#  * Push a version tag:  git tag v0.3.0 && git push origin v0.3.0
+#  * Or on GitHub: Actions -> release -> Run workflow, pick the branch and
+#    enter the version tag (e.g. v0.3.0). The tag is created on the latest
+#    commit of that branch (or an existing tag's release is rebuilt).
 #
-# The tag must match the version in CMakeLists.txt. The workflow can also be
-# run by hand (Actions -> release -> Run workflow) to rebuild the release for
-# an existing tag.
+# The tag must match the version in CMakeLists.txt.
 
 name: release
 
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to build a release for (e.g. v0.2.0)
+        description: Version tag to release (e.g. v0.3.0); created if it does not exist
         required: true
 
 permissions:
@@ -28,8 +28,6 @@ jobs:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
 
       - name: Check tag matches the project version
         shell: pwsh
@@ -93,6 +91,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           name: Crossfade Output ${{ env.TAG }}
           body_path: release-notes.md
           generate_release_notes: true
