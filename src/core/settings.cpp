@@ -26,6 +26,7 @@ void Settings::sanitize() {
   crossfadeMs = clampi(crossfadeMs, 0, 20000);
   curve = static_cast<Curve>(clampi(static_cast<int>(curve), 0, kCurveCount - 1));
   silenceThresholdDb = clampi(silenceThresholdDb, -96, -20);
+  smartFadeDb = clampi(smartFadeDb, 6, 40);
   fadeStartMs = clampi(fadeStartMs, 0, 10000);
   fadeStopMs = clampi(fadeStopMs, 0, 10000);
   fadePauseMs = clampi(fadePauseMs, 0, 5000);
@@ -46,6 +47,9 @@ std::map<std::string, std::string> Settings::toKeyValues() const {
       {"trim_tail", b(trimTail)},
       {"trim_head", b(trimHead)},
       {"silence_db", i(silenceThresholdDb)},
+      {"smart_fade_out", b(smartFadeOut)},
+      {"smart_fade_db", i(smartFadeDb)},
+      {"beat_sync", b(beatSync)},
       {"fade_start_ms", i(fadeStartMs)},
       {"fade_stop_ms", i(fadeStopMs)},
       {"fade_pause_ms", i(fadePauseMs)},
@@ -79,6 +83,9 @@ void Settings::fromKeyValues(const std::map<std::string, std::string>& kv) {
   getBool("trim_tail", trimTail);
   getBool("trim_head", trimHead);
   getInt("silence_db", silenceThresholdDb);
+  getBool("smart_fade_out", smartFadeOut);
+  getInt("smart_fade_db", smartFadeDb);
+  getBool("beat_sync", beatSync);
   getInt("fade_start_ms", fadeStartMs);
   getInt("fade_stop_ms", fadeStopMs);
   getInt("fade_pause_ms", fadePauseMs);

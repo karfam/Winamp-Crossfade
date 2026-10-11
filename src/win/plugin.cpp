@@ -80,7 +80,9 @@ void ensureEngine() {
 void Config(HWND parent) {
   ensureSettings();
   xf::Settings s = g_settings;
-  if (!xf::showConfigDialog(g_instance, parent, s)) return;
+  const std::wstring status =
+      L"Last crossfade: " + xf::utf8ToWide(xf::describeTransition(g_engine ? g_engine->lastTransition() : xf::TransitionInfo()));
+  if (!xf::showConfigDialog(g_instance, parent, s, status)) return;
   g_settings = s;
   xf::saveSettingsIni(iniPath(), s);
   if (g_engine) {
@@ -92,9 +94,9 @@ void Config(HWND parent) {
 void About(HWND parent) {
   const std::wstring text = xf::utf8ToWide(
       "Crossfade Output v" XF_VERSION "\n\n"
-      "Crossfades, gapless playback and smooth fades for Winamp.\n"
-      "Plays through WASAPI shared mode with high-quality resampling.\n\n"
-      "Free and open source. No ads, no tracking, no network access.");
+      "Crossfades with beat sync and fade-out detection, gapless playback\n"
+      "and smooth fades for Winamp, through WASAPI with high-quality resampling.\n\n"
+      "Free and open source (MIT License). No ads, no tracking, no network access.");
   MessageBoxW(parent, text.c_str(), L"About Crossfade Output", MB_OK | MB_ICONINFORMATION);
 }
 

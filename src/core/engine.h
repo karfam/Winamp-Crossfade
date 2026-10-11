@@ -4,12 +4,28 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "fade.h"
 #include "settings.h"
 
 namespace xf {
+
+// What happened at the most recent automatic crossfade (for display).
+struct TransitionInfo {
+  bool valid = false;
+  int64_t overlapFrames = 0;   // actual crossfade length
+  int overlapMs = 0;
+  int nominalMs = 0;           // crossfade length before beat alignment
+  bool beatSyncTried = false;  // beat sync was enabled for this transition
+  bool beatAligned = false;
+  double bpmOut = 0, bpmIn = 0;
+  bool fadeOutDetected = false;
+  int fadeOutCutMs = 0;        // audio skipped at the end of the outgoing track
+};
+
+std::string describeTransition(const TransitionInfo& info);
 
 // The crossfading mixer behind the Winamp output plugin. It is independent of
 // Windows: the plugin forwards the Out_Module calls to it, and an output
@@ -64,6 +80,8 @@ class Engine {
   // Mixes `frames` interleaved frames in the output format into `out`.
   void render(float* out, int frames);
 
+  TransitionInfo lastTransition() const;
+
  private:
   struct Track;
   using TrackPtr = std::unique_ptr<Track>;
@@ -77,6 +95,11 @@ class Engine {
   void makeDyingLocked(Track* t, int64_t fadeFrames);
   void pushLocked(Track* t, const float* data, size_t frames);
   void trimTailLocked(Track* t);
+  void truncateTailLocked(Track* t, size_t keep);
+  void smartFadeLocked(Track* t);
+  void analyzeTailBeatsLocked(Track* t);
+  void planBeatSyncLocked(Track* tail, Track* next, int64_t nominal, int64_t rem);
+  std::vector<float> monoLocked(const Track* t, size_t from, size_t frames) const;
   bool readyLocked(const Track* t) const;
   Track* tailBeforeLocked(size_t index) const;
   Track* firstUnstartedLocked(size_t* index) const;
@@ -102,6 +125,8 @@ class Engine {
   float panL_ = 1.0f, panR_ = 1.0f;
   int lastVolume_ = 255;
   int lastPan_ = 0;
+
+  TransitionInfo lastTransition_;
 
   std::atomic<double> latencyMs_{0.0};
 };

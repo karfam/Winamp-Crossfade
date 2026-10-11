@@ -3,12 +3,12 @@
 
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 
-IDD_CONFIG DIALOGEX 0, 0, 300, 305
+IDD_CONFIG DIALOGEX 0, 0, 300, 350
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Crossfade Output Settings"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Automatic track change", -1, 7, 7, 286, 100
+    GROUPBOX        "Automatic track change", -1, 7, 7, 286, 122
     AUTOCHECKBOX    "Crossfade between tracks (when off, tracks play gaplessly)", IDC_XFADE, 14, 20, 270, 10
     LTEXT           "Crossfade length:", IDC_XFADE_MS_LABEL, 26, 37, 80, 8
     EDITTEXT        IDC_XFADE_MS, 110, 35, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
@@ -20,36 +20,39 @@ BEGIN
     LTEXT           "Below  -", IDC_SILENCE_LABEL, 214, 78, 32, 8
     EDITTEXT        IDC_SILENCE_DB, 246, 76, 24, 12, ES_NUMBER | ES_AUTOHSCROLL
     LTEXT           "dB", -1, 274, 78, 14, 8
+    AUTOCHECKBOX    "Detect fade-outs and bring the next track in during the fade", IDC_SMART_FADE, 26, 98, 260, 10
+    AUTOCHECKBOX    "Beat sync: shift the crossfade so both tracks' beats line up", IDC_BEAT_SYNC, 26, 112, 260, 10
 
-    GROUPBOX        "Fades", -1, 7, 112, 286, 78
-    LTEXT           "Fade in when playback starts:", -1, 14, 127, 180, 8
-    EDITTEXT        IDC_FADE_START, 200, 125, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
-    LTEXT           "ms", -1, 244, 127, 20, 8
-    LTEXT           "Fade out on stop / crossfade on manual skip:", -1, 14, 143, 180, 8
-    EDITTEXT        IDC_FADE_STOP, 200, 141, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
-    LTEXT           "ms", -1, 244, 143, 20, 8
-    LTEXT           "Fade on pause and resume:", -1, 14, 159, 180, 8
-    EDITTEXT        IDC_FADE_PAUSE, 200, 157, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
-    LTEXT           "ms", -1, 244, 159, 20, 8
-    LTEXT           "Crossfade on seek:", -1, 14, 175, 180, 8
-    EDITTEXT        IDC_FADE_SEEK, 200, 173, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
-    LTEXT           "ms", -1, 244, 175, 20, 8
+    GROUPBOX        "Fades", -1, 7, 134, 286, 78
+    LTEXT           "Fade in when playback starts:", -1, 14, 149, 180, 8
+    EDITTEXT        IDC_FADE_START, 200, 147, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ms", -1, 244, 149, 20, 8
+    LTEXT           "Fade out on stop / crossfade on manual skip:", -1, 14, 165, 180, 8
+    EDITTEXT        IDC_FADE_STOP, 200, 163, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ms", -1, 244, 165, 20, 8
+    LTEXT           "Fade on pause and resume:", -1, 14, 181, 180, 8
+    EDITTEXT        IDC_FADE_PAUSE, 200, 179, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ms", -1, 244, 181, 20, 8
+    LTEXT           "Crossfade on seek:", -1, 14, 197, 180, 8
+    EDITTEXT        IDC_FADE_SEEK, 200, 195, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ms", -1, 244, 197, 20, 8
 
-    GROUPBOX        "Output (WASAPI shared mode)", -1, 7, 196, 286, 82
-    LTEXT           "Device:", -1, 14, 211, 40, 8
-    COMBOBOX        IDC_DEVICE, 60, 209, 226, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Buffer:", -1, 14, 228, 40, 8
-    EDITTEXT        IDC_BUFFER_MS, 60, 226, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
-    LTEXT           "ms", -1, 104, 228, 15, 8
-    LTEXT           "Device latency:", -1, 130, 228, 60, 8
-    EDITTEXT        IDC_DEVICE_BUFFER_MS, 195, 226, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
-    LTEXT           "ms", -1, 239, 228, 15, 8
-    AUTOCHECKBOX    "Soft limiter (prevents clipping when loud tracks overlap)", IDC_LIMITER, 14, 245, 270, 10
-    AUTOCHECKBOX    "Use Winamp's volume and balance controls", IDC_VOLUME, 14, 259, 270, 10
+    GROUPBOX        "Output (WASAPI shared mode)", -1, 7, 218, 286, 82
+    LTEXT           "Device:", -1, 14, 233, 40, 8
+    COMBOBOX        IDC_DEVICE, 60, 231, 226, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Buffer:", -1, 14, 250, 40, 8
+    EDITTEXT        IDC_BUFFER_MS, 60, 248, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ms", -1, 104, 250, 15, 8
+    LTEXT           "Device latency:", -1, 130, 250, 60, 8
+    EDITTEXT        IDC_DEVICE_BUFFER_MS, 195, 248, 40, 12, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ms", -1, 239, 250, 15, 8
+    AUTOCHECKBOX    "Soft limiter (prevents clipping when loud tracks overlap)", IDC_LIMITER, 14, 267, 270, 10
+    AUTOCHECKBOX    "Use Winamp's volume and balance controls", IDC_VOLUME, 14, 281, 270, 10
 
-    PUSHBUTTON      "Defaults", IDC_DEFAULTS, 7, 284, 60, 14
-    DEFPUSHBUTTON   "OK", IDOK, 179, 284, 55, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 238, 284, 55, 14
+    LTEXT           "", IDC_LAST_INFO, 7, 306, 286, 18
+    PUSHBUTTON      "Defaults", IDC_DEFAULTS, 7, 329, 60, 14
+    DEFPUSHBUTTON   "OK", IDOK, 179, 329, 55, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 238, 329, 55, 14
 END
 
 VS_VERSION_INFO VERSIONINFO
@@ -69,6 +72,7 @@ BEGIN
             VALUE "InternalName", "out_crossfade"
             VALUE "OriginalFilename", "out_crossfade.dll"
             VALUE "ProductName", "Winamp Crossfade Output"
+            VALUE "LegalCopyright", "Copyright (c) 2026 karfam and contributors. MIT License."
         END
     END
     BLOCK "VarFileInfo"

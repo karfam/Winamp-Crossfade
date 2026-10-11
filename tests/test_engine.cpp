@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "synth.h"
 #include "test.h"
 
 using namespace xf;
@@ -84,6 +85,7 @@ Settings quietSettings() {
   Settings s;
   s.crossfade = false;
   s.trimTail = s.trimHead = false;
+  s.smartFadeOut = s.beatSync = false;
   s.fadeStartMs = s.fadeStopMs = s.fadePauseMs = s.fadeSeekMs = 0;
   s.softLimiter = false;
   return s;
@@ -381,4 +383,94 @@ TEST(engine_short_track_between_two_crossfades) {
   const size_t start = sim.firstNonZero();
   CHECK(sim.lastNonZero() - start + 1 == 4 * kRate + kRate + 3 * kRate - kRate - kRate / 2);
   for (size_t i = start, end = sim.lastNonZero(); i <= end; ++i) CHECK(sim.at(i) > 0.1f);
+}
+
+namespace {
+
+std::vector<int16_t> toStereo16(const std::vector<float>& mono) {
+  std::vector<int16_t> out(mono.size() * 2);
+  for (size_t i = 0; i < mono.size(); ++i) {
+    const float v = std::max(-1.0f, std::min(1.0f, mono[i]));
+    out[2 * i] = out[2 * i + 1] = static_cast<int16_t>(std::lrint(v * 32767.0f));
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST(engine_beat_sync_aligns_beats) {
+  for (double phaseB : {0.0, 0.13, 0.31, 0.47}) {
+    Settings s = quietSettings();
+    s.crossfade = true;
+    s.crossfadeMs = 4000;
+    s.beatSync = true;
+    std::unique_ptr<Engine> e(makeEngine(s));
+    Sim sim(*e);
+    const double bpm = 120.0, period = 60.0 / bpm;
+    const size_t lenA = 12 * kRate;
+    sim.play(toStereo16(xft::drumLoop(kRate, bpm, 12.0, 0.05, 0.02f, 3)), kRate, 2);
+    sim.play(toStereo16(xft::drumLoop(kRate, bpm, 10.0, phaseB, 0.02f, 4)), kRate, 2);
+    sim.drain();
+
+    const TransitionInfo info = e->lastTransition();
+    CHECK(info.valid && info.beatAligned);
+    CHECK_NEAR(info.bpmOut, bpm, 1.0);
+    CHECK_NEAR(info.bpmIn, bpm, 1.0);
+    CHECK(std::abs(info.overlapMs - 4000) <= 260);  // moved by at most half a beat
+    // B starts (lenA - overlap) after A; its first kick must land on one of A's kicks.
+    const double bStart = static_cast<double>(lenA - info.overlapFrames) / kRate;
+    const double offset = std::fmod(bStart + phaseB - 0.05 + 10 * period, period);
+    CHECK(std::min(offset, period - offset) < 0.015);
+  }
+}
+
+TEST(engine_beat_sync_falls_back_without_beats) {
+  Settings s = quietSettings();
+  s.crossfade = true;
+  s.crossfadeMs = 3000;
+  s.beatSync = true;
+  std::unique_ptr<Engine> e(makeEngine(s));
+  Sim sim(*e);
+  sim.play(toStereo16(xft::drumLoop(kRate, 120.0, 10.0, 0.0, 0.02f, 3)), kRate, 2);
+  sim.play(toStereo16(xft::chord(kRate, 8.0, 0.3f)), kRate, 2);  // no beat
+  sim.drain();
+  const TransitionInfo info = e->lastTransition();
+  CHECK(info.valid && !info.beatAligned);
+  CHECK(info.overlapMs == 3000);
+}
+
+TEST(engine_smart_fade_cuts_long_fade_out) {
+  Settings s = quietSettings();
+  s.crossfade = true;
+  s.crossfadeMs = 3000;
+  s.smartFadeOut = true;
+  s.smartFadeDb = 18;
+  std::unique_ptr<Engine> e(makeEngine(s));
+  Sim sim(*e);
+  // 30 s: steady until 20 s, then a 10 s fade to -40 dB (-18 dB at 24.5 s).
+  auto a = xft::drumLoop(kRate, 120.0, 30.0, 0.0, 0.05f, 9);
+  xft::applyDbRamp(a, kRate, 20.0, 30.0, 0.0, -40.0);
+  sim.play(toStereo16(a), kRate, 2);
+  sim.play(constant(8192, 5 * kRate), kRate, 2);
+  sim.drain();
+  const TransitionInfo info = e->lastTransition();
+  CHECK(info.valid && info.fadeOutDetected);
+  CHECK_NEAR(info.fadeOutCutMs, 5500, 300);
+  CHECK(info.overlapMs == 3000);
+  const size_t total = sim.lastNonZero() - sim.firstNonZero() + 1;
+  CHECK_NEAR(total / static_cast<double>(kRate), 24.5 + 5 - 3, 0.3);
+}
+
+TEST(engine_smart_fade_leaves_normal_endings) {
+  Settings s = quietSettings();
+  s.crossfade = true;
+  s.crossfadeMs = 2000;
+  s.smartFadeOut = true;
+  std::unique_ptr<Engine> e(makeEngine(s));
+  Sim sim(*e);
+  sim.play(toStereo16(xft::drumLoop(kRate, 120.0, 20.0, 0.0, 0.05f, 9)), kRate, 2);
+  sim.play(constant(8192, 3 * kRate), kRate, 2);
+  sim.drain();
+  const TransitionInfo info = e->lastTransition();
+  CHECK(info.valid && !info.fadeOutDetected && info.fadeOutCutMs == 0);
 }

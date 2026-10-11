@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 
+#include "analysis.h"
 #include "fifo.h"
 #include "pcm.h"
 #include "resampler.h"
@@ -14,6 +16,10 @@ namespace {
 
 constexpr int kMinFadeMs = 10;           // shorter overlaps are treated as gapless
 constexpr int kMaxHeadTrimMs = 10000;    // give up skipping leading silence after this
+constexpr int kLoudnessBlockMs = 100;    // loudness history resolution
+constexpr int kSmartFadeLookaheadMs = 10000;  // extra read-ahead to reach fade-out cut points
+constexpr int kBeatWindowMs = 12000;     // audio analysed for beats on each side
+constexpr int kMinBeatWindowMs = 3000;
 constexpr float kVolumeRampSeconds = 0.02f;
 constexpr float kLimiterKnee = 0.9f;
 
@@ -48,12 +54,23 @@ struct Engine::Track {
   bool inputEnded = false;  // decoder finished (IsPlaying was called)
   bool drained = false;     // resampler tail flushed into the fifo
   bool armed = false;       // we told Winamp it finished: next Close is a natural end
-  bool tailTrimmed = false;
+  bool tailAnalyzed = false;  // end-of-track trimming / fade / beat analysis done
   bool headTrim = false;    // still skipping leading silence
   bool started = false;     // has begun playing
   bool buffering = false;   // underrun: wait for prebuffer before resuming
   bool dying = false;       // fading out after stop/skip/seek
   bool handedOff = false;   // tail that is crossfading into its successor
+
+  // Analysis.
+  LoudnessHistory loudness;      // per-block loudness of everything buffered
+  int64_t pushed = 0;            // frames pushed into the fifo (minus tail cuts)
+  bool fadeOutDetected = false;
+  int64_t fadeCutFrames = 0;
+  BeatGrid tailGrid;             // beats near the end of the track
+  double tailBeatRem = 0;        // a beat falls when remaining() == this + k * period
+  const Track* plannedFor = nullptr;  // successor the beat-sync plan was made for
+  int64_t plannedOverlap = -1;   // beat-aligned overlap, -1 = none
+  double plannedBpmIn = 0;
 
   int64_t limit = -1;       // max frames left to play, -1 = unlimited
   int64_t startFade = 0;    // fade-in length when it starts on its own
@@ -117,7 +134,9 @@ bool Engine::hasWork() const {
 int64_t Engine::msToFrames(int64_t ms) const { return ms * rate_ / 1000; }
 
 int64_t Engine::capacityFrames() const {
-  return msToFrames(s_.bufferMs + s_.handoffLeadMs + (s_.crossfade ? s_.crossfadeMs : 0));
+  int64_t ms = s_.bufferMs + s_.handoffLeadMs;
+  if (s_.crossfade) ms += s_.crossfadeMs + (s_.smartFadeOut ? kSmartFadeLookaheadMs : 0);
+  return msToFrames(ms);
 }
 
 int64_t Engine::prebufferFrames() const { return msToFrames(s_.prebufferMs); }
@@ -131,6 +150,7 @@ std::unique_ptr<Engine::Track> Engine::makeTrack(int rate, int ch, int bps) cons
   t->rs = std::make_unique<Resampler>(rate, rate_, ch_);
   t->fifo.reset(ch_, static_cast<size_t>(capacityFrames() + msToFrames(500)));
   t->fade.set(0.0f);
+  t->loudness.reset(static_cast<int>(msToFrames(kLoudnessBlockMs)));
   return t;
 }
 
@@ -207,7 +227,8 @@ int Engine::write(const char* data, int len) {
 
   if (t->inputEnded) {
     // The decoder was not done after all.
-    t->inputEnded = t->armed = t->drained = t->tailTrimmed = false;
+    t->inputEnded = t->armed = t->drained = t->tailAnalyzed = false;
+    t->tailGrid = BeatGrid();
   }
 
   const char* src = data;
@@ -260,6 +281,8 @@ void Engine::pushLocked(Track* t, const float* data, size_t frames) {
     data += first * ch_;
     frames -= first;
   }
+  t->loudness.add(data, frames, ch_);
+  t->pushed += static_cast<int64_t>(frames);
   t->fifo.push(data, frames);
 }
 
@@ -300,9 +323,11 @@ int Engine::isPlaying() {
   // Don't let Winamp move on while paused; it would unpause on the next Open.
   if (paused_) return 1;
 
-  if (s_.crossfade && s_.trimTail && !t->tailTrimmed) {
-    trimTailLocked(t);
-    t->tailTrimmed = true;
+  if (s_.crossfade && !t->tailAnalyzed) {
+    if (s_.trimTail) trimTailLocked(t);
+    if (s_.smartFadeOut) smartFadeLocked(t);
+    if (s_.beatSync) analyzeTailBeatsLocked(t);
+    t->tailAnalyzed = true;
   }
   const int64_t handoff = msToFrames(s_.handoffLeadMs + (s_.crossfade ? s_.crossfadeMs : 0));
   if (t->remaining() <= handoff) {
@@ -322,7 +347,82 @@ void Engine::trimTailLocked(Track* t) {
     if (loud) break;
     --keep;
   }
+  truncateTailLocked(t, keep);
+}
+
+void Engine::truncateTailLocked(Track* t, size_t keep) {
+  const size_t size = t->fifo.size();
+  if (keep >= size) return;
   t->fifo.truncate(keep);
+  t->pushed -= static_cast<int64_t>(size - keep);
+}
+
+void Engine::smartFadeLocked(Track* t) {
+  const int bf = t->loudness.blockFrames();
+  if (bf <= 0 || t->pushed <= 0) return;
+  const int64_t cut = detectFadeOutCut(t->loudness.blocks(), static_cast<size_t>(t->pushed / bf),
+                                       static_cast<double>(rate_) / bf, static_cast<float>(s_.smartFadeDb));
+  if (cut < 0) return;
+  t->fadeOutDetected = true;
+  const int64_t size = static_cast<int64_t>(t->fifo.size());
+  const int64_t front = t->pushed - size;
+  // Audio already played can't be cut; keep at least a full crossfade.
+  const int64_t keep = std::max(cut * bf - front, std::min(size, msToFrames(s_.crossfadeMs)));
+  if (keep >= size) return;
+  t->fadeCutFrames = size - keep;
+  truncateTailLocked(t, static_cast<size_t>(keep));
+}
+
+std::vector<float> Engine::monoLocked(const Track* t, size_t from, size_t frames) const {
+  std::vector<float> mono(frames);
+  const float scale = 1.0f / static_cast<float>(ch_);
+  for (size_t i = 0; i < frames; ++i) {
+    const float* f = t->fifo.frame(from + i);
+    float s = 0;
+    for (int c = 0; c < ch_; ++c) s += f[c];
+    mono[i] = s * scale;
+  }
+  return mono;
+}
+
+void Engine::analyzeTailBeatsLocked(Track* t) {
+  const size_t size = t->fifo.size();
+  const size_t len = std::min(size, static_cast<size_t>(msToFrames(kBeatWindowMs)));
+  if (static_cast<int64_t>(len) < msToFrames(kMinBeatWindowMs)) return;
+  const std::vector<float> mono = monoLocked(t, size - len, len);
+  const BeatGrid g = detectBeats(mono.data(), len, rate_);
+  if (!g.valid) return;
+  t->tailGrid = g;
+  // remaining() when the first detected beat plays, folded into one period.
+  t->tailBeatRem = std::fmod(static_cast<double>(len) - g.phaseFrames, g.periodFrames);
+}
+
+// Picks the overlap length that lands the incoming track's beats on the
+// outgoing track's beats, as close as possible to the nominal length.
+void Engine::planBeatSyncLocked(Track* tail, Track* next, int64_t nominal, int64_t rem) {
+  tail->plannedFor = next;
+  tail->plannedOverlap = -1;
+  tail->plannedBpmIn = 0;
+  const size_t len = std::min(next->fifo.size(), static_cast<size_t>(msToFrames(kBeatWindowMs)));
+  if (static_cast<int64_t>(len) < msToFrames(kMinBeatWindowMs)) return;
+  const std::vector<float> mono = monoLocked(next, 0, len);
+  const BeatGrid g = detectBeats(mono.data(), len, rate_);
+  if (!g.valid) return;
+  tail->plannedBpmIn = g.bpm(rate_);
+
+  // Starting the next track when remaining() == r puts its first beat
+  // (g.phaseFrames in) on an outgoing beat when r = tailBeatRem + phase + k * period.
+  const double period = tail->tailGrid.periodFrames;
+  double best = -1, bestErr = 0;
+  for (double r = tail->tailBeatRem + g.phaseFrames; r <= static_cast<double>(rem); r += period) {
+    if (r < static_cast<double>(msToFrames(kMinFadeMs))) continue;
+    const double err = std::fabs(r - static_cast<double>(nominal));
+    if (best < 0 || err < bestErr) {
+      best = r;
+      bestErr = err;
+    }
+  }
+  if (best > 0 && bestErr <= period) tail->plannedOverlap = std::llround(best);
 }
 
 int Engine::pause(int pause) {
@@ -444,9 +544,23 @@ void Engine::startPendingLocked(int64_t& segment) {
     Track* tail = tailBeforeLocked(idx);
     if (tail) {
       const int64_t tailLength = msToFrames(tail->baseMs) + tail->played + tail->remaining();
-      const int64_t overlap =
+      const int64_t nominal =
           s_.crossfade && !p->video ? std::min(msToFrames(s_.crossfadeMs), tailLength / 2) : 0;
       const int64_t rem = tail->remaining();
+      int64_t overlap = nominal;
+      const bool beatSync = nominal > 0 && s_.beatSync && tail->tailGrid.valid;
+      if (beatSync) {
+        if (tail->plannedFor != p) {
+          // Decide one beat before the nominal start, so an earlier beat is still reachable.
+          const int64_t decideAt = nominal + static_cast<int64_t>(std::ceil(tail->tailGrid.periodFrames));
+          if (rem > decideAt) {
+            segment = std::min(segment, rem - decideAt);
+            return;
+          }
+          planBeatSyncLocked(tail, p, nominal, rem);
+        }
+        if (tail->plannedOverlap > 0) overlap = tail->plannedOverlap;
+      }
       if (rem > overlap) {
         // Keep playing the tail alone until the overlap point.
         segment = std::min(segment, rem - overlap);
@@ -457,6 +571,19 @@ void Engine::startPendingLocked(int64_t& segment) {
         tail->limit = rem;
         tail->fade.start(tail->fade.gain(), 0.0f, rem, s_.curve);
         p->fade.start(0.0f, 1.0f, rem, s_.curve);
+
+        TransitionInfo info;
+        info.valid = true;
+        info.overlapFrames = rem;
+        info.overlapMs = static_cast<int>(rem * 1000 / rate_);
+        info.nominalMs = static_cast<int>(nominal * 1000 / rate_);
+        info.beatSyncTried = s_.beatSync;
+        info.beatAligned = beatSync && tail->plannedFor == p && tail->plannedOverlap == rem;
+        info.bpmOut = tail->tailGrid.bpm(rate_);
+        info.bpmIn = tail->plannedFor == p ? tail->plannedBpmIn : 0;
+        info.fadeOutDetected = tail->fadeOutDetected;
+        info.fadeOutCutMs = static_cast<int>(tail->fadeCutFrames * 1000 / rate_);
+        lastTransition_ = info;
       } else {
         p->fade.set(1.0f);  // gapless
       }
@@ -531,6 +658,38 @@ void Engine::applyMasterLocked(float* out, int64_t frames) {
       o[c] = s;
     }
   }
+}
+
+TransitionInfo Engine::lastTransition() const {
+  std::lock_guard<std::mutex> lk(mu_);
+  return lastTransition_;
+}
+
+std::string describeTransition(const TransitionInfo& info) {
+  if (!info.valid) return "No automatic crossfade yet.";
+  char buf[256];
+  std::string s;
+  std::snprintf(buf, sizeof buf, "%.2f s crossfade", info.overlapMs / 1000.0);
+  s = buf;
+  if (info.beatAligned) {
+    // Without changing tempo, beats only stay together if the tempos match
+    // (allowing for double/half time); otherwise just the first beat lines up.
+    double ratio = info.bpmIn > 0 ? info.bpmOut / info.bpmIn : 1.0;
+    while (ratio > 1.5) ratio /= 2;
+    while (ratio < 0.75) ratio *= 2;
+    const bool together = std::fabs(ratio - 1.0) < 0.04;
+    std::snprintf(buf, sizeof buf, "; %s (%.1f -> %.1f BPM, %+.2f s)",
+                  together ? "beats aligned" : "first beat aligned", info.bpmOut, info.bpmIn,
+                  (info.overlapMs - info.nominalMs) / 1000.0);
+    s += buf;
+  } else if (info.beatSyncTried) {
+    s += "; no clear beat to align";
+  }
+  if (info.fadeOutDetected) {
+    std::snprintf(buf, sizeof buf, "; fade-out detected (skipped last %.1f s)", info.fadeOutCutMs / 1000.0);
+    s += buf;
+  }
+  return s;
 }
 
 void Engine::render(float* out, int frames) {

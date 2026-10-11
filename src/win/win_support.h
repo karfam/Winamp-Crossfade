@@ -15,6 +15,7 @@ Settings loadSettingsIni(const std::wstring& path);
 void saveSettingsIni(const std::wstring& path, const Settings& s);
 
 // Modal settings dialog. Returns true and updates `s` when the user presses OK.
-bool showConfigDialog(HINSTANCE instance, HWND parent, Settings& s);
+// `status` is shown at the bottom (e.g. what the last crossfade did).
+bool showConfigDialog(HINSTANCE instance, HWND parent, Settings& s, const std::wstring& status);
 
 }  // namespace xf

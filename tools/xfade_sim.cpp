@@ -10,6 +10,8 @@
 //     --no-trim        do not skip silence between tracks
 //     --threshold DB   silence threshold, e.g. -55
 //     --skip-at SEC    simulate pressing "next" SEC seconds into each track
+//     --no-beat-sync   do not align beats
+//     --no-smart-fade  do not detect fade-outs
 
 #include <algorithm>
 #include <cstdio>
@@ -26,7 +28,8 @@ namespace {
 void usage() {
   std::fprintf(stderr,
                "usage: xfade_sim [--crossfade MS] [--curve linear|power|scurve|log] [--rate HZ]\n"
-               "                 [--no-trim] [--threshold DB] [--skip-at SEC] out.wav in1.wav in2.wav ...\n");
+               "                 [--no-trim] [--threshold DB] [--skip-at SEC] [--no-beat-sync]\n"
+               "                 [--no-smart-fade] out.wav in1.wav in2.wav ...\n");
 }
 
 struct Renderer {
@@ -42,7 +45,18 @@ struct Renderer {
   void tick() {
     engine.render(block.data(), blockFrames);
     out.insert(out.end(), block.begin(), block.end());
+    const xf::TransitionInfo info = engine.lastTransition();
+    if (info.valid && !reported(info)) {
+      last = info;
+      std::printf("  at %7.2f s: %s\n", static_cast<double>(out.size()) / channels / (blockFrames * 100),
+                  xf::describeTransition(info).c_str());
+    }
   }
+  bool reported(const xf::TransitionInfo& info) const {
+    return last.valid && info.overlapFrames == last.overlapFrames && info.bpmIn == last.bpmIn &&
+           info.bpmOut == last.bpmOut && info.fadeOutCutMs == last.fadeOutCutMs;
+  }
+  xf::TransitionInfo last;
 };
 
 }  // namespace
@@ -82,6 +96,10 @@ int main(int argc, char** argv) {
       s.silenceThresholdDb = std::atoi(next());
     } else if (a == "--skip-at") {
       skipAt = std::atof(next());
+    } else if (a == "--no-beat-sync") {
+      s.beatSync = false;
+    } else if (a == "--no-smart-fade") {
+      s.smartFadeOut = false;
     } else if (a == "-h" || a == "--help") {
       usage();
       return 0;

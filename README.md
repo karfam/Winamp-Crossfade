@@ -11,6 +11,12 @@ for *SqrSoft Advanced Crossfading Output*, without the adware.
 * **Silence skipping**: fades go from the last *audible* sample of a track
   into the first audible sample of the next, so trailing and leading silence
   doesn't create dead air.
+* **Fade-out detection**: when a song ends in a long, gradual fade-out, the
+  next song comes in *during* the fade instead of after it has died away.
+* **Beat sync**: the plugin detects the tempo and beats on both sides of the
+  transition. It shifts the crossfade by up to half a beat so the incoming
+  track's beats land on the outgoing track's beats. Tracks without a clear
+  beat get a normal crossfade.
 * **Smooth fades** on stop, manual skip (a short crossfade), pause/resume
   and seek. There are no clicks.
 * **Four fade curves**: equal power (default), linear, S-curve, logarithmic.
@@ -45,6 +51,8 @@ Winamp output plugins, should also work.
 | Fade curve | Equal power | Equal power keeps loudness steady for unrelated songs. Linear/S-curve suit similar material. |
 | Skip silence at end / start | on | Crossfade from the last to the first audible sample. Only used when crossfading. |
 | Silence threshold | -55 dB | Level below which audio counts as silence. |
+| Detect fade-outs | on | If a track ends with a gradual fade-out, treat the point where it has faded 18 dB as the end. Adds 10 s of read-ahead. The depth can be changed with `smart_fade_db` in the INI file. |
+| Beat sync | on | Move the crossfade start by up to half a beat so the beats line up. |
 | Fade in when playback starts | 0 ms | Fade-in after pressing Play from stopped. |
 | Fade out on stop / manual skip | 800 ms | Stop fades out; pressing Next crossfades over this length. |
 | Fade on pause and resume | 250 ms | |
@@ -72,6 +80,35 @@ crossfader has to infer it:
 3. A `Close()` *without* that handshake means the user pressed Stop or Next.
    Everything fades out quickly, and a track opened during that fade fades
    in.
+
+**Fade-out detection.** The plugin keeps a loudness history of each track
+(one value per 100 ms). At the end of a track it looks for a gradual fade
+with these properties:
+
+* at least 3 s long
+* ends at least 15 dB below the song's level
+* falls steadily rather than in one step
+
+If it finds one, it cuts the track where the fade reaches -18 dB, and the
+crossfade ends there. Quiet codas, abrupt endings and short final decays are
+left alone.
+
+**Beat sync.** An onset detector covers the low, mid and high bands, so
+kicks, snares and hats all count. Autocorrelation finds the tempo
+(60–200 BPM) and a comb filter finds where the beats fall. This runs on the
+last 12 s of the outgoing track and the first 12 s of the incoming one. The
+plugin then picks the crossfade start, within half a beat of the configured
+length, that puts the new track's first beat on a beat of the old one.
+
+The plugin does not change tempo. Beats stay locked through the fade when the
+tempos match, including double and half time. When they don't, only the first
+beat lines up, so true tempo matching would need time-stretching. Audio
+without a clear beat (ambient, classical, spoken word) is detected and gets
+an ordinary crossfade.
+
+The settings dialog shows what the last crossfade did, for example
+`4.88 s crossfade; beats aligned (124.3 -> 125.7 BPM, -0.12 s); fade-out
+detected (skipped last 6.6 s)`.
 
 All of this lives in a portable C++17 engine (`src/core`), which is unit
 tested on any OS. The Windows-specific parts (`src/win`) are the Winamp glue,
@@ -116,20 +153,31 @@ cmake --build build-win32
   xfade_sim --skip-at 30 mix.wav a.wav b.wav    # simulate pressing Next at 0:30
   ```
 
+  The simulator prints what each transition did (beats, fade-outs). Use
+  `--no-beat-sync` and `--no-smart-fade` to compare.
+
 * `plugin_host.exe` (Windows only) loads the built DLL and plays two
   generated tones through it via the Winamp plugin interface, as a smoke
   test.
 
 ## Status and roadmap
 
-Version 0.1.0. The engine is covered by unit tests. The DLL has been
-exercised through the Winamp plugin interface with `plugin_host`, but not
-yet inside a real Winamp, so please report anything odd.
+Version 0.2.0. Version 0.1.0 was tested in Winamp. The engine, beat
+detection and fade-out detection are covered by unit tests with synthetic
+music. They have not yet been tuned on a large library of real songs, so
+please report transitions that sound wrong. The "Last crossfade" line in the
+settings dialog makes that easy.
 
 Possible next steps:
 
-* WASAPI exclusive mode and bit-perfect output
-* ASIO output
-* Optional ReplayGain-aware loudness matching across the crossfade
-* Per-transition rules (e.g. no crossfade between consecutive tracks of the
-  same album)
+* Album-aware mode: play consecutive tracks from the same album gaplessly
+  and crossfade only between albums
+* Separate fade lengths for Stop and for Next
+* Tempo matching with time-stretching (true DJ-style beatmatching)
+* Loudness matching across the crossfade
+* WASAPI exclusive mode and ASIO output
+
+## License
+
+[MIT](LICENSE): free to use, modify and redistribute, including in other
+projects, as long as the copyright notice is kept.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(winamp_crossfade VERSION 0.1.0 LANGUAGES CXX)
+project(winamp_crossfade VERSION 0.2.0 LANGUAGES CXX)
 if(WIN32)
   enable_language(RC)
 endif()
@@ -30,6 +30,7 @@ option(XF_BUILD_TOOLS "Build the offline crossfade simulator" ON)
 
 # --- Portable audio core -----------------------------------------------------
 add_library(xfade_core STATIC
+  src/core/analysis.cpp
   src/core/engine.cpp
   src/core/fade.cpp
   src/core/pcm.cpp
@@ -68,6 +69,7 @@ if(XF_BUILD_TESTS)
   enable_testing()
   add_executable(xfade_tests
     tests/test_main.cpp
+    tests/test_analysis.cpp
     tests/test_pcm.cpp
     tests/test_fade.cpp
     tests/test_resampler.cpp

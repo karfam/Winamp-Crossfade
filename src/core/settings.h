@@ -17,6 +17,12 @@ struct Settings {
   bool trimTail = true;
   bool trimHead = true;
   int silenceThresholdDb = -55;
+  // Treat the point where a gradual fade-out has dropped smartFadeDb below the
+  // song's level as its end, so the next track arrives during the fade.
+  bool smartFadeOut = true;
+  int smartFadeDb = 18;
+  // Shift the crossfade by up to half a beat so both tracks' beats line up.
+  bool beatSync = true;
 
   // Fades for user actions.
   int fadeStartMs = 0;    // fade-in when playback starts from stopped
@@ -24,7 +30,8 @@ struct Settings {
   int fadePauseMs = 250;  // fade on pause / resume
   int fadeSeekMs = 60;    // crossfade between old and new position on seek
 
-  // Buffering. Total buffer = bufferMs + handoffLeadMs + crossfadeMs.
+  // Buffering. Total buffer = bufferMs + handoffLeadMs + crossfadeMs
+  // (+ 10 s read-ahead with smartFadeOut, to reach cut points of long fades).
   int bufferMs = 2000;
   int prebufferMs = 250;      // audio needed before a track starts playing
   int handoffLeadMs = 1000;   // how early Winamp is told to open the next track
