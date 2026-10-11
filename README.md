@@ -32,8 +32,8 @@ for *SqrSoft Advanced Crossfading Output*, without the adware.
 
 ## Install
 
-1. Download `out_crossfade.dll` from the
-   [Actions artifacts](../../actions) (or build it, see below).
+1. Download `out_crossfade.dll` from the latest
+   [release](../../releases/latest) (or build it, see below).
 2. Close Winamp and copy the DLL into Winamp's `Plugins` folder (e.g.
    `C:\Program Files (x86)\Winamp\Plugins`).
 3. Start Winamp, open **Preferences → Plug-ins → Output**, select
@@ -142,6 +142,22 @@ cmake --build build-win32
 ```
 
 **Engine tests on any OS:** `cmake -S . -B build && cmake --build build && ctest --test-dir build`
+
+### Making a release
+
+Bump `VERSION` in `CMakeLists.txt`, commit, then tag and push:
+
+```sh
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+The `release` workflow builds and tests the plugin with Visual Studio. It
+then publishes a GitHub Release with `out_crossfade.dll` and a zip (DLL,
+README, license and `xfade_sim`), plus install steps and SHA-256 checksums.
+It refuses to publish if the tag doesn't match the version in
+`CMakeLists.txt`. Every other push still builds and tests, with the DLL
+available as an Actions artifact.
 
 ### Tools
 

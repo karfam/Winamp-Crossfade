@@ -1,0 +1,101 @@
+# Publishes a GitHub Release with the plugin DLL whenever a version tag is
+# pushed:
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# The tag must match the version in CMakeLists.txt. The workflow can also be
+# run by hand (Actions -> release -> Run workflow) to rebuild the release for
+# an existing tag.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build a release for (e.g. v0.2.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Check tag matches the project version
+        shell: pwsh
+        run: |
+          $version = $env:TAG -replace '^v', ''
+          $m = Select-String -Path CMakeLists.txt -Pattern 'project\(winamp_crossfade VERSION ([0-9.]+)'
+          $cmakeVersion = $m.Matches[0].Groups[1].Value
+          if ($cmakeVersion -ne $version) {
+            Write-Error "Tag $env:TAG does not match CMakeLists.txt version $cmakeVersion"
+            exit 1
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Configure (32-bit, like Winamp)
+        run: cmake -S . -B build -A Win32
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Smoke test the plugin DLL
+        run: build/Release/plugin_host.exe build/Release/out_crossfade.dll 4
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "out_crossfade-$env:VERSION-win32"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item build/Release/out_crossfade.dll, README.md, LICENSE -Destination $name
+          New-Item -ItemType Directory -Path "$name/tools" | Out-Null
+          Copy-Item build/Release/xfade_sim.exe -Destination "$name/tools"
+          Compress-Archive -Path "$name/*" -DestinationPath "$name.zip"
+          Copy-Item build/Release/out_crossfade.dll -Destination out_crossfade.dll
+
+          $dllHash = (Get-FileHash out_crossfade.dll -Algorithm SHA256).Hash.ToLower()
+          $zipHash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          @"
+          ## Install
+
+          1. Close Winamp.
+          2. Download **out_crossfade.dll** below and copy it into Winamp's ``Plugins`` folder
+             (e.g. ``C:\Program Files (x86)\Winamp\Plugins``), replacing any older version.
+          3. Start Winamp, open **Preferences -> Plug-ins -> Output**, select **Crossfade Output**
+             and click **Configure** to adjust settings.
+
+          The zip contains the same DLL plus the README, the license and the ``xfade_sim`` tool.
+          Requires Windows 7 or later and 32-bit Winamp 5.x.
+
+          ## Checksums (SHA-256)
+
+          | File | SHA-256 |
+          |---|---|
+          | out_crossfade.dll | ``$dllHash`` |
+          | $name.zip | ``$zipHash`` |
+          "@ | Out-File -Encoding utf8 release-notes.md
+          "ZIP=$name.zip" >> $env:GITHUB_ENV
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Crossfade Output ${{ env.TAG }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          files: |
+            out_crossfade.dll
+            ${{ env.ZIP }}
