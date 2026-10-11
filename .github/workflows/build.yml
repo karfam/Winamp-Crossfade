@@ -1,0 +1,41 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (32-bit, like Winamp)
+        run: cmake -S . -B build -A Win32
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Smoke test the plugin DLL
+        run: build/Release/plugin_host.exe build/Release/out_crossfade.dll 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: out_crossfade-win32
+          path: |
+            build/Release/out_crossfade.dll
+            build/Release/xfade_sim.exe
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MinGW
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-i686
+      - name: Build and test the core
+        run: |
+          cmake -S . -B build
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+      - name: Cross-compile the plugin
+        run: |
+          cmake -S . -B build-win32 -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-i686.cmake
+          cmake --build build-win32 --parallel
